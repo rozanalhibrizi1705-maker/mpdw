@@ -3,8 +3,11 @@
 ---
 
 ```{r}
-
+library(readxl)
+data <- read_excel("C:/Users/ThinkPad T495/Downloads/Data Mpdw.xlsx")
+print
 ```
 
-![](images/2.png)x=3+2
-x
+```{r}
+data
+```
