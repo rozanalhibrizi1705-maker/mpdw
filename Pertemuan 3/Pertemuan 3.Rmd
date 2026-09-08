@@ -1,0 +1,250 @@
+---
+title: "Latihan 3 MPDW - Distributed Lag Model & ARDL"
+author: "Rozan Al Hibrizi / M0401241096"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Packages
+
+```{r packages, message=FALSE, warning=FALSE}
+library(dLagM)
+library(dynlm)
+library(MLmetrics)
+library(lmtest)
+library(car)
+```
+
+# Latihan 1 : Distributed Lag Model (Pangsa Pasar vs Harga)
+
+Diberikan data pangsa pasar (Y) dan harga (X) pasta gigi selama 20 periode. Akan dilakukan
+pemodelan *distributed lag* untuk melihat pengaruh harga terhadap pangsa pasar, kemudian
+dicari model terbaik dengan membandingkan model **Koyck** dan **Distributed Lag Model (DLM)**.
+
+## Input Data
+
+```{r data1}
+Period <- 1:20
+Y <- c(3.63, 4.20, 3.33, 4.54, 2.89, 4.87, 4.90, 5.29, 6.18, 7.20,
+       7.25, 6.09, 6.80, 8.65, 8.43, 8.29, 7.18, 7.90, 8.45, 8.23)
+X <- c(0.97, 0.95, 0.99, 0.91, 0.98, 0.90, 0.89, 0.86, 0.85, 0.82,
+       0.79, 0.83, 0.81, 0.77, 0.76, 0.80, 0.83, 0.79, 0.76, 0.78)
+
+data1 <- data.frame(Period, Y, X)
+data1
+```
+
+## Eksplorasi Data
+
+```{r explore1}
+plot(data1$X, data1$Y, type = "p", pch = 19, col = "blue",
+     xlab = "Price", ylab = "Market Share",
+     main = "Scatter Plot Pangsa Pasar vs Harga")
+```
+
+Pola scatter menunjukkan hubungan negatif antara harga dan pangsa pasar - semakin rendah
+harga, semakin tinggi pangsa pasar produk.
+
+## Pembagian Data
+
+Data dibagi menjadi 16 periode data training dan 4 periode data testing.
+
+```{r split1}
+data1_train <- data1[1:16, ]
+data1_test  <- data1[17:20, ]
+```
+
+## Model Koyck
+
+```{r koyck1}
+model.koyck1 <- koyckDlm(x = data1_train$X, y = data1_train$Y)
+summary(model.koyck1)
+AIC(model.koyck1)
+BIC(model.koyck1)
+```
+
+```{r koyck1-forecast}
+fore.koyck1 <- forecast(model = model.koyck1, x = data1_test$X, h = 4)
+fore.koyck1
+
+mape.koyck1.test  <- MAPE(fore.koyck1$forecasts, data1_test$Y)
+mape.koyck1.train <- GoF(model.koyck1)$MAPE
+mape.koyck1.test
+mape.koyck1.train
+```
+
+## Distributed Lag Model (DLM) - Penentuan Lag Optimum
+
+```{r dlm1-lag}
+# n data training hanya 16, sehingga q dibatasi maksimal 5 agar model tidak
+# kehabisan derajat bebas (overfitting) - q terlalu besar relatif terhadap n
+# akan membuat AIC menyesatkan karena residual df mendekati nol
+finiteDLMauto(formula = Y ~ X,
+              data = data.frame(data1_train),
+              q.min = 1, q.max = 5,
+              model.type = "dlm", error.type = "AIC")
+```
+
+Lag optimum dipilih berdasarkan nilai AIC terkecil dari tabel di atas (dibatasi q.max = 5
+karena ukuran data training kecil, n = 16).
+
+```{r dlm1-model}
+# ganti q sesuai lag optimum hasil finiteDLMauto() di atas
+# model di-fit dengan formula + data (lebih aman dari isu kolinearitas antar-lag
+# dibanding fit dengan x + y, lihat catatan di bagian ARDL Latihan 2)
+model.dlm1 <- dlm(formula = Y ~ X, data = data.frame(data1_train), q = 1)
+summary(model.dlm1)
+AIC(model.dlm1)
+BIC(model.dlm1)
+```
+
+```{r dlm1-forecast}
+fore.dlm1 <- forecast(model = model.dlm1, x = data1_test$X, h = 4)
+fore.dlm1
+
+mape.dlm1.test  <- MAPE(fore.dlm1$forecasts, data1_test$Y)
+mape.dlm1.train <- GoF(model.dlm1)$MAPE
+mape.dlm1.test
+mape.dlm1.train
+```
+
+## Perbandingan Model & Kesimpulan Latihan 1
+
+```{r compare1}
+akurasi1 <- matrix(c(mape.koyck1.test, mape.dlm1.test))
+row.names(akurasi1) <- c("Koyck", "DLM")
+colnames(akurasi1) <- c("MAPE Testing")
+akurasi1
+```
+
+Model dengan nilai MAPE testing terkecil dipilih sebagai model terbaik untuk kasus pangsa
+pasar vs harga ini.
+
+```{r plot1}
+plot(data1_test$X, data1_test$Y, type = "b", col = "black", pch = 19,
+     ylim = range(c(data1_test$Y, fore.koyck1$forecasts, fore.dlm1$forecasts)),
+     xlab = "Price", ylab = "Market Share")
+points(data1_test$X, fore.koyck1$forecasts, col = "red")
+lines(data1_test$X, fore.koyck1$forecasts, col = "red")
+points(data1_test$X, fore.dlm1$forecasts, col = "blue")
+lines(data1_test$X, fore.dlm1$forecasts, col = "blue")
+legend("topright", c("Aktual", "Koyck", "DLM"), lty = 1,
+       col = c("black", "red", "blue"), cex = 0.8)
+```
+
+---
+
+# Latihan 2 : ARDL (Sales vs Advertising)
+
+Diberikan data penjualan (Sales) dan biaya iklan (Advertising) tahunan dari 1975-2014.
+Akan dilakukan pemodelan **Autoregressive Distributed Lag (ARDL)** dan dicari model terbaik.
+
+## Input Data
+
+```{r data2}
+Year <- 1975:2014
+Sales <- c(11.7, 12.0, 12.3, 12.8, 13.1, 13.6, 13.9, 14.4, 14.7, 15.3,
+           15.5, 15.8, 16.1, 16.6, 16.9, 16.7, 16.9, 17.4, 17.6, 17.9,
+           18.0, 17.9, 18.0, 18.2, 18.2, 18.3, 18.6, 19.2, 19.3, 19.5,
+           19.2, 19.3, 19.5, 20.0, 20.0, 19.9, 19.8, 19.9, 20.2, 21.0)
+Advertising <- c(9.4, 9.6, 10.0, 10.4, 10.8, 10.9, 11.7, 12.2, 12.5, 12.9,
+                  13.0, 13.2, 13.8, 14.2, 14.6, 14.9, 15.0, 15.4, 15.7, 15.9,
+                  15.9, 16.0, 16.3, 16.2, 16.8, 17.3, 17.6, 18.1, 18.3, 18.5,
+                  18.7, 18.9, 19.2, 20.0, 20.0, 20.3, 20.4, 21.0, 21.5, 22.1)
+
+data2 <- data.frame(Year, Sales, Advertising)
+data2
+```
+
+## Eksplorasi Data
+
+```{r explore2}
+plot(data2$Year, data2$Sales, type = "l", col = "darkgreen",
+     xlab = "Year", ylab = "Sales", main = "Tren Sales 1975-2014")
+```
+
+Kedua peubah menunjukkan tren naik yang cukup mirip dari tahun ke tahun, mengindikasikan
+Sales dan Advertising bergerak searah.
+
+## Pembagian Data
+
+Data dibagi menjadi 32 tahun data training (1975-2006) dan 8 tahun data testing (2007-2014).
+
+```{r split2}
+data2_train <- data2[1:32, ]
+data2_test  <- data2[33:40, ]
+```
+
+## Penentuan Lag Optimum ARDL
+
+```{r ardl2-lag}
+model.ardl2.opt <- ardlBoundOrders(data = data.frame(data2), ic = "AIC",
+                                    formula = Sales ~ Advertising)
+
+min_p <- c()
+for (i in 1:15) {
+  min_p[i] <- min(model.ardl2.opt$Stat.table[[i]])
+}
+q_opt <- which(min_p == min(min_p, na.rm = TRUE))
+p_opt <- which(model.ardl2.opt$Stat.table[[q_opt]] ==
+                 min(model.ardl2.opt$Stat.table[[q_opt]], na.rm = TRUE))
+
+data.frame("q_optimum" = q_opt, "p_optimum" = p_opt,
+           "AIC" = model.ardl2.opt$min.Stat)
+```
+
+> Catatan: jika `q_optimum` yang keluar = 0, `ardlDlm()` tidak bisa menerimanya (harus q >= 1).
+> Dalam kasus itu, pakai kandidat terbaik berikutnya dari tabel `Stat.table` (q >= 1).
+
+## Pemodelan ARDL dengan Lag Optimum
+
+```{r ardl2-model}
+# ganti p dan q sesuai hasil q_opt dan p_opt di atas
+# catatan: ardlDlm() mensyaratkan q >= 1 (tidak bisa q=0),
+# kandidat terbaik berikutnya berdasarkan AIC adalah p=1, q=1
+#
+# PENTING: model di-fit dengan formula + data (bukan x + y). Ini karena data
+# Sales & Advertising sama-sama trending sehingga rawan kolinearitas tinggi
+# antar-lag; jika model di-fit dengan x & y dan ada koefisien yang otomatis
+# dibuang (NA) akibat kolinearitas tsb, forecast.ardlDlm() akan error dan
+# mengharuskan model di-fit ulang dengan formula + data.
+model.ardl2 <- ardlDlm(formula = Sales ~ Advertising, data = data2_train,
+                        p = 1, q = 1)
+summary(model.ardl2)
+AIC(model.ardl2)
+BIC(model.ardl2)
+```
+
+## Peramalan dan Akurasi Model ARDL
+
+```{r ardl2-forecast}
+fore.ardl2 <- forecast(model = model.ardl2, x = data2_test$Advertising, h = 8)
+fore.ardl2
+
+mape.ardl2.test  <- MAPE(fore.ardl2$forecasts, data2_test$Sales)
+mape.ardl2.train <- GoF(model.ardl2)$MAPE
+mape.ardl2.test
+mape.ardl2.train
+```
+
+## Plot Perbandingan Aktual vs Ramalan
+
+```{r plot2}
+plot(data2_test$Year, data2_test$Sales, type = "b", col = "black", pch = 19,
+     ylim = range(c(data2_test$Sales, fore.ardl2$forecasts)),
+     xlab = "Year", ylab = "Sales")
+points(data2_test$Year, fore.ardl2$forecasts, col = "red")
+lines(data2_test$Year, fore.ardl2$forecasts, col = "red")
+legend("topleft", c("Aktual", "ARDL"), lty = 1,
+       col = c("black", "red"), cex = 0.8)
+```
+
+## Kesimpulan Latihan 2
+
+Nilai MAPE training dan testing yang berdekatan menunjukkan model ARDL dengan orde $(p,q)$
+optimum di atas cukup baik dan tidak overfitted/underfitted untuk meramalkan Sales
+berdasarkan Advertising.
