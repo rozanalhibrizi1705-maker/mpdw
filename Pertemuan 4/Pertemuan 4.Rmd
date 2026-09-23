@@ -1,0 +1,896 @@
+---
+title: 'Latihan Pertemuan 4: Proses MA(2), AR(2), dan ARMA(2,2)'
+author: "Rozan Al Hibrizi | M0401241096"
+date: "`r format(Sys.Date(), '%d %B %Y')`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    code_folding: show
+    df_print: paged
+  pdf_document:
+    toc: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE, fig.align = "center")
+```
+
+```{r}
+library(ggplot2)
+library(tsibble)
+library(tseries)
+library(MASS)
+library(TSA)
+set.seed(8990)
+```
+
+Semua data pada latihan ini dibangkitkan sebanyak **300 data** dengan galat $e_t \sim N(0,1)$ (nilai *default* `arima.sim`). Parameter mengikuti penulisan pada `arima.sim`, yaitu:
+
+- MA(2): $Y_t = e_t + \theta_1 e_{t-1} + \theta_2 e_{t-2}$
+- AR(2): $Y_t = \phi_1 Y_{t-1} + \phi_2 Y_{t-2} + e_t$
+- ARMA(2,2): $Y_t = \phi_1 Y_{t-1} + \phi_2 Y_{t-2} + e_t + \theta_1 e_{t-1} + \theta_2 e_{t-2}$
+
+Untuk setiap proses, dilakukan pembangkitan secara manual dan dengan `arima.sim`, kemudian masing-masing data dieksplorasi melalui plot *time series*, plot ACF, plot PACF, plot EACF, uji ADF, plot Box-Cox, *scatterplot*, dan perhitungan autokorelasi (data bangkitan dan teoritis).
+
+# Proses MA(2)
+
+Model MA(2) dengan $\theta_1 = 0.4$ dan $\theta_2 = 0.6$ sebanyak 300 data.
+
+## Pembangkitan Data
+
+### Manual
+
+```{r}
+# Galat (dibangkitkan 2 data awal tambahan untuk e_{t-1} dan e_{t-2})
+e <- rnorm(302)
+theta1 <- 0.4
+theta2 <- 0.6
+
+ma_man <- e[3:302] + theta1 * e[2:301] + theta2 * e[1:300]
+ma_man <- ts(ma_man)
+```
+
+### Dengan `arima.sim`
+
+```{r}
+ma_ari <- arima.sim(n = 300, list(order = c(0, 0, 2), ma = c(0.4, 0.6))) |> ts()
+```
+
+## Data Bangkitan Manual
+
+### Plot Time Series
+
+```{r}
+ma_man |>
+  as_tsibble() |>
+  ggplot(aes(x = index, y = value)) +
+  geom_line() +
+  theme_bw() +
+  xlab("Obs") +
+  ylab("Nilai")
+```
+
+```{r}
+mean(ma_man)
+var(ma_man)
+```
+
+Plot deret waktu di atas menunjukkan bahwa data stasioner dalam rataan, ditandai dengan data yang menyebar di sekitar nilai tengahnya dan tidak menunjukkan adanya tren maupun pola musiman, serta stasioner dalam ragam, ditandai dengan data berfluktuasi pada rentang yang relatif sama sepanjang waktu.
+
+### Plot ACF
+
+```{r}
+acf(ma_man)
+```
+
+Berdasarkan plot ACF, terlihat bahwa plot ACF pada data tersebut *cuts off* setelah lag ke-2, sesuai dengan karakteristik proses MA(2).
+
+### Plot PACF
+
+```{r}
+pacf(ma_man)
+```
+
+Berdasarkan plot PACF, terlihat bahwa plot PACF pada data tersebut cenderung *tails off* (menurun secara perlahan mengikuti pola gelombang sinus/eksponensial), sesuai dengan karakteristik proses MA(2).
+
+### Plot EACF
+
+```{r}
+eacf(ma_man)
+```
+
+Berdasarkan plot EACF, pola segitiga simbol "o" cenderung berawal dari titik AR = 0 dan MA = 2, sehingga mengarah pada model MA(2).
+
+### Uji ADF
+
+Uji ADF (Augmented Dickey–Fuller) adalah uji statistik yang digunakan untuk memeriksa apakah suatu deret waktu stasioner dalam rataan.
+
+```{r}
+adf_ma_man <- tseries::adf.test(ma_man)
+adf_ma_man
+```
+
+$H_0$ : Data tidak stasioner dalam rataan
+
+$H_1$ : Data stasioner dalam rataan
+
+Berdasarkan uji ADF tersebut, didapat **p-value** sebesar `r round(adf_ma_man$p.value, 4)` yang `r ifelse(adf_ma_man$p.value < 0.05, "lebih kecil", "lebih besar")` dari taraf nyata 5% sehingga `r ifelse(adf_ma_man$p.value < 0.05, "tolak", "gagal tolak")` $H_0$ dan menandakan bahwa data **`r ifelse(adf_ma_man$p.value < 0.05, "stasioner", "tidak stasioner")` dalam rataan**. Hal ini `r ifelse(adf_ma_man$p.value < 0.05, "sesuai", "tidak sesuai")` dengan hasil eksplorasi menggunakan plot time series dan plot ACF.
+
+### Plot Box-Cox
+
+```{r}
+index <- seq(1:300)
+
+# Data digeser agar bernilai positif
+y_shift <- ma_man - min(ma_man) + 1
+
+# Box-Cox
+bc <- boxcox(y_shift ~ index,
+             lambda = seq(-2, 5, by = 0.01))
+
+# Nilai lambda optimum
+lambda <- bc$x[which.max(bc$y)]
+lambda
+
+# Selang kepercayaan 95% untuk lambda
+ci_lambda <- bc$x[bc$y > max(bc$y) - 0.5 * qchisq(0.95, 1)]
+
+# Batas bawah dan batas atas
+ci_lower <- min(ci_lambda)
+ci_upper <- max(ci_lambda)
+c(Batas_Bawah = ci_lower, Batas_Atas = ci_upper)
+```
+
+Gambar di atas menunjukkan nilai $\lambda$ optimum (*rounded value*) sebesar **`r round(lambda, 2)`** dan selang kepercayaan 95% nilai $\lambda$ memiliki batas bawah **`r round(ci_lower, 2)`** dan batas atas **`r round(ci_upper, 2)`**. Selang tersebut `r ifelse(ci_lower <= 1 & ci_upper >= 1, "memuat", "tidak memuat")` nilai satu sehingga dapat dikatakan bahwa data bangkitan **`r ifelse(ci_lower <= 1 & ci_upper >= 1, "stasioner", "tidak stasioner")` dalam ragam**. `r ifelse(ci_lower <= 1 & ci_upper >= 1, "Hal ini sesuai dengan hasil eksplorasi menggunakan plot time series.", "Hal ini tidak sesuai dengan hasil eksplorasi plot time series yang menunjukkan lebar pita cenderung sama, sehingga perlu diperhatikan bahwa hasil Box-Cox berasal dari data yang telah digeser.")`
+
+**Catatan:** Fungsi `boxcox()` di R tidak dapat digunakan langsung pada data yang mengandung nilai nol atau negatif. Karena itu data digeser dengan suatu konstanta positif (`y - min(y) + 1`) sebelum dilakukan analisis Box–Cox.
+
+### Scatterplot
+
+```{r}
+y_ <- as.numeric(ma_man)
+n_ <- length(y_)
+
+sc1 <- ggplot(data.frame(x = y_[1:(n_-1)], y = y_[2:n_]), aes(x = x, y = y)) +
+  geom_point() + theme_bw() +
+  xlab(expression(Y[t-1])) + ylab(expression(Y[t])) +
+  ggtitle("Yt dengan Yt-1")
+sc2 <- ggplot(data.frame(x = y_[1:(n_-2)], y = y_[3:n_]), aes(x = x, y = y)) +
+  geom_point() + theme_bw() +
+  xlab(expression(Y[t-2])) + ylab(expression(Y[t])) +
+  ggtitle("Yt dengan Yt-2")
+sc3 <- ggplot(data.frame(x = y_[1:(n_-3)], y = y_[4:n_]), aes(x = x, y = y)) +
+  geom_point() + theme_bw() +
+  xlab(expression(Y[t-3])) + ylab(expression(Y[t])) +
+  ggtitle("Yt dengan Yt-3")
+
+ggpubr::ggarrange(sc1, sc2, sc3, nrow = 1)
+```
+
+### Autokorelasi Data Bangkitan dan Teoritis
+
+```{r}
+acf_data_ma_man <- acf(ma_man, plot = FALSE)$acf[2:4]
+acf_teori_ma_man <- ARMAacf(ma = c(0.4, 0.6), lag.max = 3)[2:4]
+
+data.frame(Lag = 1:3,
+           Data_Bangkitan = acf_data_ma_man,
+           Teoritis = acf_teori_ma_man)
+```
+
+## Data Bangkitan `arima.sim`
+
+### Plot Time Series
+
+```{r}
+ma_ari |>
+  as_tsibble() |>
+  ggplot(aes(x = index, y = value)) +
+  geom_line() +
+  theme_bw() +
+  xlab("Obs") +
+  ylab("Nilai")
+```
+
+```{r}
+mean(ma_ari)
+var(ma_ari)
+```
+
+Plot deret waktu di atas menunjukkan bahwa data stasioner dalam rataan, ditandai dengan data yang menyebar di sekitar nilai tengahnya dan tidak menunjukkan adanya tren maupun pola musiman, serta stasioner dalam ragam, ditandai dengan data berfluktuasi pada rentang yang relatif sama sepanjang waktu.
+
+### Plot ACF
+
+```{r}
+acf(ma_ari)
+```
+
+Berdasarkan plot ACF, terlihat bahwa plot ACF pada data tersebut *cuts off* setelah lag ke-2, sesuai dengan karakteristik proses MA(2).
+
+### Plot PACF
+
+```{r}
+pacf(ma_ari)
+```
+
+Berdasarkan plot PACF, terlihat bahwa plot PACF pada data tersebut cenderung *tails off* (menurun secara perlahan mengikuti pola gelombang sinus/eksponensial), sesuai dengan karakteristik proses MA(2).
+
+### Plot EACF
+
+```{r}
+eacf(ma_ari)
+```
+
+Berdasarkan plot EACF, pola segitiga simbol "o" cenderung berawal dari titik AR = 0 dan MA = 2, sehingga mengarah pada model MA(2).
+
+### Uji ADF
+
+Uji ADF (Augmented Dickey–Fuller) adalah uji statistik yang digunakan untuk memeriksa apakah suatu deret waktu stasioner dalam rataan.
+
+```{r}
+adf_ma_ari <- tseries::adf.test(ma_ari)
+adf_ma_ari
+```
+
+$H_0$ : Data tidak stasioner dalam rataan
+
+$H_1$ : Data stasioner dalam rataan
+
+Berdasarkan uji ADF tersebut, didapat **p-value** sebesar `r round(adf_ma_ari$p.value, 4)` yang `r ifelse(adf_ma_ari$p.value < 0.05, "lebih kecil", "lebih besar")` dari taraf nyata 5% sehingga `r ifelse(adf_ma_ari$p.value < 0.05, "tolak", "gagal tolak")` $H_0$ dan menandakan bahwa data **`r ifelse(adf_ma_ari$p.value < 0.05, "stasioner", "tidak stasioner")` dalam rataan**. Hal ini `r ifelse(adf_ma_ari$p.value < 0.05, "sesuai", "tidak sesuai")` dengan hasil eksplorasi menggunakan plot time series dan plot ACF.
+
+### Plot Box-Cox
+
+```{r}
+index <- seq(1:300)
+
+# Data digeser agar bernilai positif
+y_shift <- ma_ari - min(ma_ari) + 1
+
+# Box-Cox
+bc <- boxcox(y_shift ~ index,
+             lambda = seq(-2, 5, by = 0.01))
+
+# Nilai lambda optimum
+lambda <- bc$x[which.max(bc$y)]
+lambda
+
+# Selang kepercayaan 95% untuk lambda
+ci_lambda <- bc$x[bc$y > max(bc$y) - 0.5 * qchisq(0.95, 1)]
+
+# Batas bawah dan batas atas
+ci_lower <- min(ci_lambda)
+ci_upper <- max(ci_lambda)
+c(Batas_Bawah = ci_lower, Batas_Atas = ci_upper)
+```
+
+Gambar di atas menunjukkan nilai $\lambda$ optimum (*rounded value*) sebesar **`r round(lambda, 2)`** dan selang kepercayaan 95% nilai $\lambda$ memiliki batas bawah **`r round(ci_lower, 2)`** dan batas atas **`r round(ci_upper, 2)`**. Selang tersebut `r ifelse(ci_lower <= 1 & ci_upper >= 1, "memuat", "tidak memuat")` nilai satu sehingga dapat dikatakan bahwa data bangkitan **`r ifelse(ci_lower <= 1 & ci_upper >= 1, "stasioner", "tidak stasioner")` dalam ragam**. `r ifelse(ci_lower <= 1 & ci_upper >= 1, "Hal ini sesuai dengan hasil eksplorasi menggunakan plot time series.", "Hal ini tidak sesuai dengan hasil eksplorasi plot time series yang menunjukkan lebar pita cenderung sama, sehingga perlu diperhatikan bahwa hasil Box-Cox berasal dari data yang telah digeser.")`
+
+**Catatan:** Fungsi `boxcox()` di R tidak dapat digunakan langsung pada data yang mengandung nilai nol atau negatif. Karena itu data digeser dengan suatu konstanta positif (`y - min(y) + 1`) sebelum dilakukan analisis Box–Cox.
+
+### Scatterplot
+
+```{r}
+y_ <- as.numeric(ma_ari)
+n_ <- length(y_)
+
+sc1 <- ggplot(data.frame(x = y_[1:(n_-1)], y = y_[2:n_]), aes(x = x, y = y)) +
+  geom_point() + theme_bw() +
+  xlab(expression(Y[t-1])) + ylab(expression(Y[t])) +
+  ggtitle("Yt dengan Yt-1")
+sc2 <- ggplot(data.frame(x = y_[1:(n_-2)], y = y_[3:n_]), aes(x = x, y = y)) +
+  geom_point() + theme_bw() +
+  xlab(expression(Y[t-2])) + ylab(expression(Y[t])) +
+  ggtitle("Yt dengan Yt-2")
+sc3 <- ggplot(data.frame(x = y_[1:(n_-3)], y = y_[4:n_]), aes(x = x, y = y)) +
+  geom_point() + theme_bw() +
+  xlab(expression(Y[t-3])) + ylab(expression(Y[t])) +
+  ggtitle("Yt dengan Yt-3")
+
+ggpubr::ggarrange(sc1, sc2, sc3, nrow = 1)
+```
+
+### Autokorelasi Data Bangkitan dan Teoritis
+
+```{r}
+acf_data_ma_ari <- acf(ma_ari, plot = FALSE)$acf[2:4]
+acf_teori_ma_ari <- ARMAacf(ma = c(0.4, 0.6), lag.max = 3)[2:4]
+
+data.frame(Lag = 1:3,
+           Data_Bangkitan = acf_data_ma_ari,
+           Teoritis = acf_teori_ma_ari)
+```
+
+
+# Proses AR(2)
+
+Model AR(2) dengan $\phi_1 = 0.5$ dan $\phi_2 = 0.2$ sebanyak 300 data.
+
+## Pembangkitan Data
+
+### Manual
+
+```{r}
+e <- rnorm(300)
+phi1 <- 0.5
+phi2 <- 0.2
+
+ar_man <- numeric(300)
+ar_man[1] <- e[1]
+ar_man[2] <- phi1 * ar_man[1] + e[2]
+for (t in 3:300) {
+  ar_man[t] <- phi1 * ar_man[t-1] + phi2 * ar_man[t-2] + e[t]
+}
+ar_man <- ts(ar_man)
+```
+
+### Dengan `arima.sim`
+
+```{r}
+ar_ari <- arima.sim(n = 300, list(order = c(2, 0, 0), ar = c(0.5, 0.2))) |> ts()
+```
+
+## Data Bangkitan Manual
+
+### Plot Time Series
+
+```{r}
+ar_man |>
+  as_tsibble() |>
+  ggplot(aes(x = index, y = value)) +
+  geom_line() +
+  theme_bw() +
+  xlab("Obs") +
+  ylab("Nilai")
+```
+
+```{r}
+mean(ar_man)
+var(ar_man)
+```
+
+Plot deret waktu di atas menunjukkan bahwa data stasioner dalam rataan, ditandai dengan data yang menyebar di sekitar nilai tengahnya dan tidak menunjukkan adanya tren maupun pola musiman, serta stasioner dalam ragam, ditandai dengan data berfluktuasi pada rentang yang relatif sama sepanjang waktu.
+
+### Plot ACF
+
+```{r}
+acf(ar_man)
+```
+
+Berdasarkan plot ACF, terlihat bahwa plot ACF pada data tersebut cenderung *tails off* dan menurun secara perlahan, sesuai dengan karakteristik proses AR(2).
+
+### Plot PACF
+
+```{r}
+pacf(ar_man)
+```
+
+Berdasarkan plot PACF, terlihat bahwa plot PACF pada data tersebut *cuts off* setelah lag ke-2, sesuai dengan karakteristik proses AR(2).
+
+### Plot EACF
+
+```{r}
+eacf(ar_man)
+```
+
+Berdasarkan plot EACF, pola segitiga simbol "o" cenderung berawal dari titik AR = 2 dan MA = 0, sehingga mengarah pada model AR(2).
+
+### Uji ADF
+
+Uji ADF (Augmented Dickey–Fuller) adalah uji statistik yang digunakan untuk memeriksa apakah suatu deret waktu stasioner dalam rataan.
+
+```{r}
+adf_ar_man <- tseries::adf.test(ar_man)
+adf_ar_man
+```
+
+$H_0$ : Data tidak stasioner dalam rataan
+
+$H_1$ : Data stasioner dalam rataan
+
+Berdasarkan uji ADF tersebut, didapat **p-value** sebesar `r round(adf_ar_man$p.value, 4)` yang `r ifelse(adf_ar_man$p.value < 0.05, "lebih kecil", "lebih besar")` dari taraf nyata 5% sehingga `r ifelse(adf_ar_man$p.value < 0.05, "tolak", "gagal tolak")` $H_0$ dan menandakan bahwa data **`r ifelse(adf_ar_man$p.value < 0.05, "stasioner", "tidak stasioner")` dalam rataan**. Hal ini `r ifelse(adf_ar_man$p.value < 0.05, "sesuai", "tidak sesuai")` dengan hasil eksplorasi menggunakan plot time series dan plot ACF.
+
+### Plot Box-Cox
+
+```{r}
+index <- seq(1:300)
+
+# Data digeser agar bernilai positif
+y_shift <- ar_man - min(ar_man) + 1
+
+# Box-Cox
+bc <- boxcox(y_shift ~ index,
+             lambda = seq(-2, 5, by = 0.01))
+
+# Nilai lambda optimum
+lambda <- bc$x[which.max(bc$y)]
+lambda
+
+# Selang kepercayaan 95% untuk lambda
+ci_lambda <- bc$x[bc$y > max(bc$y) - 0.5 * qchisq(0.95, 1)]
+
+# Batas bawah dan batas atas
+ci_lower <- min(ci_lambda)
+ci_upper <- max(ci_lambda)
+c(Batas_Bawah = ci_lower, Batas_Atas = ci_upper)
+```
+
+Gambar di atas menunjukkan nilai $\lambda$ optimum (*rounded value*) sebesar **`r round(lambda, 2)`** dan selang kepercayaan 95% nilai $\lambda$ memiliki batas bawah **`r round(ci_lower, 2)`** dan batas atas **`r round(ci_upper, 2)`**. Selang tersebut `r ifelse(ci_lower <= 1 & ci_upper >= 1, "memuat", "tidak memuat")` nilai satu sehingga dapat dikatakan bahwa data bangkitan **`r ifelse(ci_lower <= 1 & ci_upper >= 1, "stasioner", "tidak stasioner")` dalam ragam**. `r ifelse(ci_lower <= 1 & ci_upper >= 1, "Hal ini sesuai dengan hasil eksplorasi menggunakan plot time series.", "Hal ini tidak sesuai dengan hasil eksplorasi plot time series yang menunjukkan lebar pita cenderung sama, sehingga perlu diperhatikan bahwa hasil Box-Cox berasal dari data yang telah digeser.")`
+
+**Catatan:** Fungsi `boxcox()` di R tidak dapat digunakan langsung pada data yang mengandung nilai nol atau negatif. Karena itu data digeser dengan suatu konstanta positif (`y - min(y) + 1`) sebelum dilakukan analisis Box–Cox.
+
+### Scatterplot
+
+```{r}
+y_ <- as.numeric(ar_man)
+n_ <- length(y_)
+
+sc1 <- ggplot(data.frame(x = y_[1:(n_-1)], y = y_[2:n_]), aes(x = x, y = y)) +
+  geom_point() + theme_bw() +
+  xlab(expression(Y[t-1])) + ylab(expression(Y[t])) +
+  ggtitle("Yt dengan Yt-1")
+sc2 <- ggplot(data.frame(x = y_[1:(n_-2)], y = y_[3:n_]), aes(x = x, y = y)) +
+  geom_point() + theme_bw() +
+  xlab(expression(Y[t-2])) + ylab(expression(Y[t])) +
+  ggtitle("Yt dengan Yt-2")
+sc3 <- ggplot(data.frame(x = y_[1:(n_-3)], y = y_[4:n_]), aes(x = x, y = y)) +
+  geom_point() + theme_bw() +
+  xlab(expression(Y[t-3])) + ylab(expression(Y[t])) +
+  ggtitle("Yt dengan Yt-3")
+
+ggpubr::ggarrange(sc1, sc2, sc3, nrow = 1)
+```
+
+### Autokorelasi Data Bangkitan dan Teoritis
+
+```{r}
+acf_data_ar_man <- acf(ar_man, plot = FALSE)$acf[2:4]
+acf_teori_ar_man <- ARMAacf(ar = c(0.5, 0.2), lag.max = 3)[2:4]
+
+data.frame(Lag = 1:3,
+           Data_Bangkitan = acf_data_ar_man,
+           Teoritis = acf_teori_ar_man)
+```
+
+## Data Bangkitan `arima.sim`
+
+### Plot Time Series
+
+```{r}
+ar_ari |>
+  as_tsibble() |>
+  ggplot(aes(x = index, y = value)) +
+  geom_line() +
+  theme_bw() +
+  xlab("Obs") +
+  ylab("Nilai")
+```
+
+```{r}
+mean(ar_ari)
+var(ar_ari)
+```
+
+Plot deret waktu di atas menunjukkan bahwa data stasioner dalam rataan, ditandai dengan data yang menyebar di sekitar nilai tengahnya dan tidak menunjukkan adanya tren maupun pola musiman, serta stasioner dalam ragam, ditandai dengan data berfluktuasi pada rentang yang relatif sama sepanjang waktu.
+
+### Plot ACF
+
+```{r}
+acf(ar_ari)
+```
+
+Berdasarkan plot ACF, terlihat bahwa plot ACF pada data tersebut cenderung *tails off* dan menurun secara perlahan, sesuai dengan karakteristik proses AR(2).
+
+### Plot PACF
+
+```{r}
+pacf(ar_ari)
+```
+
+Berdasarkan plot PACF, terlihat bahwa plot PACF pada data tersebut *cuts off* setelah lag ke-2, sesuai dengan karakteristik proses AR(2).
+
+### Plot EACF
+
+```{r}
+eacf(ar_ari)
+```
+
+Berdasarkan plot EACF, pola segitiga simbol "o" cenderung berawal dari titik AR = 2 dan MA = 0, sehingga mengarah pada model AR(2).
+
+### Uji ADF
+
+Uji ADF (Augmented Dickey–Fuller) adalah uji statistik yang digunakan untuk memeriksa apakah suatu deret waktu stasioner dalam rataan.
+
+```{r}
+adf_ar_ari <- tseries::adf.test(ar_ari)
+adf_ar_ari
+```
+
+$H_0$ : Data tidak stasioner dalam rataan
+
+$H_1$ : Data stasioner dalam rataan
+
+Berdasarkan uji ADF tersebut, didapat **p-value** sebesar `r round(adf_ar_ari$p.value, 4)` yang `r ifelse(adf_ar_ari$p.value < 0.05, "lebih kecil", "lebih besar")` dari taraf nyata 5% sehingga `r ifelse(adf_ar_ari$p.value < 0.05, "tolak", "gagal tolak")` $H_0$ dan menandakan bahwa data **`r ifelse(adf_ar_ari$p.value < 0.05, "stasioner", "tidak stasioner")` dalam rataan**. Hal ini `r ifelse(adf_ar_ari$p.value < 0.05, "sesuai", "tidak sesuai")` dengan hasil eksplorasi menggunakan plot time series dan plot ACF.
+
+### Plot Box-Cox
+
+```{r}
+index <- seq(1:300)
+
+# Data digeser agar bernilai positif
+y_shift <- ar_ari - min(ar_ari) + 1
+
+# Box-Cox
+bc <- boxcox(y_shift ~ index,
+             lambda = seq(-2, 5, by = 0.01))
+
+# Nilai lambda optimum
+lambda <- bc$x[which.max(bc$y)]
+lambda
+
+# Selang kepercayaan 95% untuk lambda
+ci_lambda <- bc$x[bc$y > max(bc$y) - 0.5 * qchisq(0.95, 1)]
+
+# Batas bawah dan batas atas
+ci_lower <- min(ci_lambda)
+ci_upper <- max(ci_lambda)
+c(Batas_Bawah = ci_lower, Batas_Atas = ci_upper)
+```
+
+Gambar di atas menunjukkan nilai $\lambda$ optimum (*rounded value*) sebesar **`r round(lambda, 2)`** dan selang kepercayaan 95% nilai $\lambda$ memiliki batas bawah **`r round(ci_lower, 2)`** dan batas atas **`r round(ci_upper, 2)`**. Selang tersebut `r ifelse(ci_lower <= 1 & ci_upper >= 1, "memuat", "tidak memuat")` nilai satu sehingga dapat dikatakan bahwa data bangkitan **`r ifelse(ci_lower <= 1 & ci_upper >= 1, "stasioner", "tidak stasioner")` dalam ragam**. `r ifelse(ci_lower <= 1 & ci_upper >= 1, "Hal ini sesuai dengan hasil eksplorasi menggunakan plot time series.", "Hal ini tidak sesuai dengan hasil eksplorasi plot time series yang menunjukkan lebar pita cenderung sama, sehingga perlu diperhatikan bahwa hasil Box-Cox berasal dari data yang telah digeser.")`
+
+**Catatan:** Fungsi `boxcox()` di R tidak dapat digunakan langsung pada data yang mengandung nilai nol atau negatif. Karena itu data digeser dengan suatu konstanta positif (`y - min(y) + 1`) sebelum dilakukan analisis Box–Cox.
+
+### Scatterplot
+
+```{r}
+y_ <- as.numeric(ar_ari)
+n_ <- length(y_)
+
+sc1 <- ggplot(data.frame(x = y_[1:(n_-1)], y = y_[2:n_]), aes(x = x, y = y)) +
+  geom_point() + theme_bw() +
+  xlab(expression(Y[t-1])) + ylab(expression(Y[t])) +
+  ggtitle("Yt dengan Yt-1")
+sc2 <- ggplot(data.frame(x = y_[1:(n_-2)], y = y_[3:n_]), aes(x = x, y = y)) +
+  geom_point() + theme_bw() +
+  xlab(expression(Y[t-2])) + ylab(expression(Y[t])) +
+  ggtitle("Yt dengan Yt-2")
+sc3 <- ggplot(data.frame(x = y_[1:(n_-3)], y = y_[4:n_]), aes(x = x, y = y)) +
+  geom_point() + theme_bw() +
+  xlab(expression(Y[t-3])) + ylab(expression(Y[t])) +
+  ggtitle("Yt dengan Yt-3")
+
+ggpubr::ggarrange(sc1, sc2, sc3, nrow = 1)
+```
+
+### Autokorelasi Data Bangkitan dan Teoritis
+
+```{r}
+acf_data_ar_ari <- acf(ar_ari, plot = FALSE)$acf[2:4]
+acf_teori_ar_ari <- ARMAacf(ar = c(0.5, 0.2), lag.max = 3)[2:4]
+
+data.frame(Lag = 1:3,
+           Data_Bangkitan = acf_data_ar_ari,
+           Teoritis = acf_teori_ar_ari)
+```
+
+
+# Proses ARMA(2,2)
+
+Model ARMA(2,2) dengan $\theta_1 = 0.4$, $\theta_2 = 0.6$, $\phi_1 = 0.5$ dan $\phi_2 = 0.2$ sebanyak 300 data.
+
+## Pembangkitan Data
+
+### Manual
+
+```{r}
+e <- rnorm(300)
+phi1 <- 0.5
+phi2 <- 0.2
+theta1 <- 0.4
+theta2 <- 0.6
+
+arma_man <- numeric(300)
+arma_man[1] <- e[1]
+arma_man[2] <- phi1 * arma_man[1] + e[2] + theta1 * e[1]
+for (t in 3:300) {
+  arma_man[t] <- phi1 * arma_man[t-1] + phi2 * arma_man[t-2] +
+    e[t] + theta1 * e[t-1] + theta2 * e[t-2]
+}
+arma_man <- ts(arma_man)
+```
+
+### Dengan `arima.sim`
+
+```{r}
+arma_ari <- arima.sim(n = 300, list(order = c(2, 0, 2),
+                                    ar = c(0.5, 0.2), ma = c(0.4, 0.6))) |> ts()
+```
+
+## Data Bangkitan Manual
+
+### Plot Time Series
+
+```{r}
+arma_man |>
+  as_tsibble() |>
+  ggplot(aes(x = index, y = value)) +
+  geom_line() +
+  theme_bw() +
+  xlab("Obs") +
+  ylab("Nilai")
+```
+
+```{r}
+mean(arma_man)
+var(arma_man)
+```
+
+Plot deret waktu di atas menunjukkan bahwa data stasioner dalam rataan, ditandai dengan data yang menyebar di sekitar nilai tengahnya dan tidak menunjukkan adanya tren maupun pola musiman, serta stasioner dalam ragam, ditandai dengan data berfluktuasi pada rentang yang relatif sama sepanjang waktu.
+
+### Plot ACF
+
+```{r}
+acf(arma_man)
+```
+
+Berdasarkan plot ACF, terlihat bahwa plot ACF pada data tersebut cenderung *tails off* dan menurun secara perlahan, sesuai dengan karakteristik proses ARMA.
+
+### Plot PACF
+
+```{r}
+pacf(arma_man)
+```
+
+Berdasarkan plot PACF, terlihat bahwa plot PACF pada data tersebut cenderung *tails off*, sesuai dengan karakteristik proses ARMA.
+
+### Plot EACF
+
+```{r}
+eacf(arma_man)
+```
+
+Berdasarkan plot EACF, pola segitiga simbol "o" cenderung berawal dari titik AR = 2 dan MA = 2, sehingga mengarah pada model ARMA(2,2).
+
+### Uji ADF
+
+Uji ADF (Augmented Dickey–Fuller) adalah uji statistik yang digunakan untuk memeriksa apakah suatu deret waktu stasioner dalam rataan.
+
+```{r}
+adf_arma_man <- tseries::adf.test(arma_man)
+adf_arma_man
+```
+
+$H_0$ : Data tidak stasioner dalam rataan
+
+$H_1$ : Data stasioner dalam rataan
+
+Berdasarkan uji ADF tersebut, didapat **p-value** sebesar `r round(adf_arma_man$p.value, 4)` yang `r ifelse(adf_arma_man$p.value < 0.05, "lebih kecil", "lebih besar")` dari taraf nyata 5% sehingga `r ifelse(adf_arma_man$p.value < 0.05, "tolak", "gagal tolak")` $H_0$ dan menandakan bahwa data **`r ifelse(adf_arma_man$p.value < 0.05, "stasioner", "tidak stasioner")` dalam rataan**. Hal ini `r ifelse(adf_arma_man$p.value < 0.05, "sesuai", "tidak sesuai")` dengan hasil eksplorasi menggunakan plot time series dan plot ACF.
+
+### Plot Box-Cox
+
+```{r}
+index <- seq(1:300)
+
+# Data digeser agar bernilai positif
+y_shift <- arma_man - min(arma_man) + 1
+
+# Box-Cox
+bc <- boxcox(y_shift ~ index,
+             lambda = seq(-2, 5, by = 0.01))
+
+# Nilai lambda optimum
+lambda <- bc$x[which.max(bc$y)]
+lambda
+
+# Selang kepercayaan 95% untuk lambda
+ci_lambda <- bc$x[bc$y > max(bc$y) - 0.5 * qchisq(0.95, 1)]
+
+# Batas bawah dan batas atas
+ci_lower <- min(ci_lambda)
+ci_upper <- max(ci_lambda)
+c(Batas_Bawah = ci_lower, Batas_Atas = ci_upper)
+```
+
+Gambar di atas menunjukkan nilai $\lambda$ optimum (*rounded value*) sebesar **`r round(lambda, 2)`** dan selang kepercayaan 95% nilai $\lambda$ memiliki batas bawah **`r round(ci_lower, 2)`** dan batas atas **`r round(ci_upper, 2)`**. Selang tersebut `r ifelse(ci_lower <= 1 & ci_upper >= 1, "memuat", "tidak memuat")` nilai satu sehingga dapat dikatakan bahwa data bangkitan **`r ifelse(ci_lower <= 1 & ci_upper >= 1, "stasioner", "tidak stasioner")` dalam ragam**. `r ifelse(ci_lower <= 1 & ci_upper >= 1, "Hal ini sesuai dengan hasil eksplorasi menggunakan plot time series.", "Hal ini tidak sesuai dengan hasil eksplorasi plot time series yang menunjukkan lebar pita cenderung sama, sehingga perlu diperhatikan bahwa hasil Box-Cox berasal dari data yang telah digeser.")`
+
+**Catatan:** Fungsi `boxcox()` di R tidak dapat digunakan langsung pada data yang mengandung nilai nol atau negatif. Karena itu data digeser dengan suatu konstanta positif (`y - min(y) + 1`) sebelum dilakukan analisis Box–Cox.
+
+### Scatterplot
+
+```{r}
+y_ <- as.numeric(arma_man)
+n_ <- length(y_)
+
+sc1 <- ggplot(data.frame(x = y_[1:(n_-1)], y = y_[2:n_]), aes(x = x, y = y)) +
+  geom_point() + theme_bw() +
+  xlab(expression(Y[t-1])) + ylab(expression(Y[t])) +
+  ggtitle("Yt dengan Yt-1")
+sc2 <- ggplot(data.frame(x = y_[1:(n_-2)], y = y_[3:n_]), aes(x = x, y = y)) +
+  geom_point() + theme_bw() +
+  xlab(expression(Y[t-2])) + ylab(expression(Y[t])) +
+  ggtitle("Yt dengan Yt-2")
+sc3 <- ggplot(data.frame(x = y_[1:(n_-3)], y = y_[4:n_]), aes(x = x, y = y)) +
+  geom_point() + theme_bw() +
+  xlab(expression(Y[t-3])) + ylab(expression(Y[t])) +
+  ggtitle("Yt dengan Yt-3")
+
+ggpubr::ggarrange(sc1, sc2, sc3, nrow = 1)
+```
+
+### Autokorelasi Data Bangkitan dan Teoritis
+
+```{r}
+acf_data_arma_man <- acf(arma_man, plot = FALSE)$acf[2:4]
+acf_teori_arma_man <- ARMAacf(ar = c(0.5, 0.2), ma = c(0.4, 0.6), lag.max = 3)[2:4]
+
+data.frame(Lag = 1:3,
+           Data_Bangkitan = acf_data_arma_man,
+           Teoritis = acf_teori_arma_man)
+```
+
+## Data Bangkitan `arima.sim`
+
+### Plot Time Series
+
+```{r}
+arma_ari |>
+  as_tsibble() |>
+  ggplot(aes(x = index, y = value)) +
+  geom_line() +
+  theme_bw() +
+  xlab("Obs") +
+  ylab("Nilai")
+```
+
+```{r}
+mean(arma_ari)
+var(arma_ari)
+```
+
+Plot deret waktu di atas menunjukkan bahwa data stasioner dalam rataan, ditandai dengan data yang menyebar di sekitar nilai tengahnya dan tidak menunjukkan adanya tren maupun pola musiman, serta stasioner dalam ragam, ditandai dengan data berfluktuasi pada rentang yang relatif sama sepanjang waktu.
+
+### Plot ACF
+
+```{r}
+acf(arma_ari)
+```
+
+Berdasarkan plot ACF, terlihat bahwa plot ACF pada data tersebut cenderung *tails off* dan menurun secara perlahan, sesuai dengan karakteristik proses ARMA.
+
+### Plot PACF
+
+```{r}
+pacf(arma_ari)
+```
+
+Berdasarkan plot PACF, terlihat bahwa plot PACF pada data tersebut cenderung *tails off*, sesuai dengan karakteristik proses ARMA.
+
+### Plot EACF
+
+```{r}
+eacf(arma_ari)
+```
+
+Berdasarkan plot EACF, pola segitiga simbol "o" cenderung berawal dari titik AR = 2 dan MA = 2, sehingga mengarah pada model ARMA(2,2).
+
+### Uji ADF
+
+Uji ADF (Augmented Dickey–Fuller) adalah uji statistik yang digunakan untuk memeriksa apakah suatu deret waktu stasioner dalam rataan.
+
+```{r}
+adf_arma_ari <- tseries::adf.test(arma_ari)
+adf_arma_ari
+```
+
+$H_0$ : Data tidak stasioner dalam rataan
+
+$H_1$ : Data stasioner dalam rataan
+
+Berdasarkan uji ADF tersebut, didapat **p-value** sebesar `r round(adf_arma_ari$p.value, 4)` yang `r ifelse(adf_arma_ari$p.value < 0.05, "lebih kecil", "lebih besar")` dari taraf nyata 5% sehingga `r ifelse(adf_arma_ari$p.value < 0.05, "tolak", "gagal tolak")` $H_0$ dan menandakan bahwa data **`r ifelse(adf_arma_ari$p.value < 0.05, "stasioner", "tidak stasioner")` dalam rataan**. Hal ini `r ifelse(adf_arma_ari$p.value < 0.05, "sesuai", "tidak sesuai")` dengan hasil eksplorasi menggunakan plot time series dan plot ACF.
+
+### Plot Box-Cox
+
+```{r}
+index <- seq(1:300)
+
+# Data digeser agar bernilai positif
+y_shift <- arma_ari - min(arma_ari) + 1
+
+# Box-Cox
+bc <- boxcox(y_shift ~ index,
+             lambda = seq(-2, 5, by = 0.01))
+
+# Nilai lambda optimum
+lambda <- bc$x[which.max(bc$y)]
+lambda
+
+# Selang kepercayaan 95% untuk lambda
+ci_lambda <- bc$x[bc$y > max(bc$y) - 0.5 * qchisq(0.95, 1)]
+
+# Batas bawah dan batas atas
+ci_lower <- min(ci_lambda)
+ci_upper <- max(ci_lambda)
+c(Batas_Bawah = ci_lower, Batas_Atas = ci_upper)
+```
+
+Gambar di atas menunjukkan nilai $\lambda$ optimum (*rounded value*) sebesar **`r round(lambda, 2)`** dan selang kepercayaan 95% nilai $\lambda$ memiliki batas bawah **`r round(ci_lower, 2)`** dan batas atas **`r round(ci_upper, 2)`**. Selang tersebut `r ifelse(ci_lower <= 1 & ci_upper >= 1, "memuat", "tidak memuat")` nilai satu sehingga dapat dikatakan bahwa data bangkitan **`r ifelse(ci_lower <= 1 & ci_upper >= 1, "stasioner", "tidak stasioner")` dalam ragam**. `r ifelse(ci_lower <= 1 & ci_upper >= 1, "Hal ini sesuai dengan hasil eksplorasi menggunakan plot time series.", "Hal ini tidak sesuai dengan hasil eksplorasi plot time series yang menunjukkan lebar pita cenderung sama, sehingga perlu diperhatikan bahwa hasil Box-Cox berasal dari data yang telah digeser.")`
+
+**Catatan:** Fungsi `boxcox()` di R tidak dapat digunakan langsung pada data yang mengandung nilai nol atau negatif. Karena itu data digeser dengan suatu konstanta positif (`y - min(y) + 1`) sebelum dilakukan analisis Box–Cox.
+
+### Scatterplot
+
+```{r}
+y_ <- as.numeric(arma_ari)
+n_ <- length(y_)
+
+sc1 <- ggplot(data.frame(x = y_[1:(n_-1)], y = y_[2:n_]), aes(x = x, y = y)) +
+  geom_point() + theme_bw() +
+  xlab(expression(Y[t-1])) + ylab(expression(Y[t])) +
+  ggtitle("Yt dengan Yt-1")
+sc2 <- ggplot(data.frame(x = y_[1:(n_-2)], y = y_[3:n_]), aes(x = x, y = y)) +
+  geom_point() + theme_bw() +
+  xlab(expression(Y[t-2])) + ylab(expression(Y[t])) +
+  ggtitle("Yt dengan Yt-2")
+sc3 <- ggplot(data.frame(x = y_[1:(n_-3)], y = y_[4:n_]), aes(x = x, y = y)) +
+  geom_point() + theme_bw() +
+  xlab(expression(Y[t-3])) + ylab(expression(Y[t])) +
+  ggtitle("Yt dengan Yt-3")
+
+ggpubr::ggarrange(sc1, sc2, sc3, nrow = 1)
+```
+
+### Autokorelasi Data Bangkitan dan Teoritis
+
+```{r}
+acf_data_arma_ari <- acf(arma_ari, plot = FALSE)$acf[2:4]
+acf_teori_arma_ari <- ARMAacf(ar = c(0.5, 0.2), ma = c(0.4, 0.6), lag.max = 3)[2:4]
+
+data.frame(Lag = 1:3,
+           Data_Bangkitan = acf_data_arma_ari,
+           Teoritis = acf_teori_arma_ari)
+```
+
+
+# Perhitungan Teoritis Autokorelasi
+
+Fungsi `ARMAacf()` pada R digunakan untuk menghitung autokorelasi teoritis. Berikut perhitungan manual sebagai pembanding.
+
+## MA(2)
+
+$$
+\rho_1 = \frac{\theta_1 + \theta_1\theta_2}{1+\theta_1^2+\theta_2^2}, \quad
+\rho_2 = \frac{\theta_2}{1+\theta_1^2+\theta_2^2}, \quad
+\rho_k = 0,\ k \geq 3
+$$
+
+```{r}
+th1 <- 0.4; th2 <- 0.6
+rho1_ma <- (th1 + th1 * th2) / (1 + th1^2 + th2^2)
+rho2_ma <- th2 / (1 + th1^2 + th2^2)
+rho3_ma <- 0
+c(rho1 = rho1_ma, rho2 = rho2_ma, rho3 = rho3_ma)
+```
+
+## AR(2)
+
+$$
+\rho_1 = \frac{\phi_1}{1-\phi_2}, \quad
+\rho_k = \phi_1\rho_{k-1} + \phi_2\rho_{k-2},\ k \geq 2
+$$
+
+```{r}
+ph1 <- 0.5; ph2 <- 0.2
+rho1_ar <- ph1 / (1 - ph2)
+rho2_ar <- ph1 * rho1_ar + ph2
+rho3_ar <- ph1 * rho2_ar + ph2 * rho1_ar
+c(rho1 = rho1_ar, rho2 = rho2_ar, rho3 = rho3_ar)
+```
+
+## ARMA(2,2)
+
+Autokorelasi teoritis ARMA(2,2) dihitung dengan `ARMAacf()`.
+
+```{r}
+ARMAacf(ar = c(0.5, 0.2), ma = c(0.4, 0.6), lag.max = 3)[2:4]
+```
